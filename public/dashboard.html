@@ -7,11 +7,11 @@
   <meta name="description" content="Submit and track your tasks in real time. Data syncs to Google Sheets." />
   <link rel="stylesheet" href="css/styles.css" />
   <style>
-    /* ── File upload drop zone ─────────────────────────── */
+    /* ── Multi-image drop zone ─────────────────────────── */
     .drop-zone {
       border: 2px dashed var(--border);
       border-radius: var(--radius-md);
-      padding: 1.5rem;
+      padding: 1.75rem 1.5rem;
       text-align: center;
       cursor: pointer;
       transition: all var(--transition);
@@ -20,37 +20,70 @@
     }
     .drop-zone:hover, .drop-zone.drag-over {
       border-color: var(--accent-1);
-      background: rgba(99,102,241,0.05);
+      background: rgba(99,102,241,0.06);
     }
     .drop-zone input[type="file"] {
       position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
     }
-    .drop-zone-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .drop-zone-icon  { font-size: 2rem; margin-bottom: 0.4rem; }
     .drop-zone-label { font-size: 0.875rem; color: var(--text-secondary); }
-    .drop-zone-hint  { font-size: 0.75rem;  color: var(--text-muted); margin-top: 0.25rem; }
-    /* ── Image preview ──────────────────────────────── */
-    .img-preview-wrap {
-      display: flex; align-items: flex-start; gap: 1rem; margin-top: 0.875rem;
-      padding: 0.875rem; background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      animation: fadeIn 0.2s ease;
+    .drop-zone-hint  { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+    /* ── Image preview grid ─────────────────────────────── */
+    .img-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.875rem;
     }
-    .img-preview-wrap img {
-      width: 80px; height: 80px; object-fit: cover;
-      border-radius: var(--radius-sm); flex-shrink: 0;
+    .img-card {
+      position: relative;
       border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: rgba(255,255,255,0.03);
+      animation: fadeIn 0.25s ease;
     }
-    .img-preview-info { flex: 1; min-width: 0; }
-    .img-preview-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .img-preview-size { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
-    .upload-progress {
-      height: 4px; background: rgba(255,255,255,0.06); border-radius: 99px;
-      margin-top: 0.5rem; overflow: hidden;
+    .img-card img {
+      width: 100%; aspect-ratio: 1;
+      object-fit: cover; display: block;
     }
-    .upload-progress-bar {
-      height: 100%; background: var(--accent-grad); border-radius: 99px;
-      width: 0%; transition: width 0.3s ease;
+    .img-card-info {
+      padding: 0.35rem 0.5rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .img-card-remove {
+      position: absolute; top: 4px; right: 4px;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.65);
+      color: #fff; border: none; cursor: pointer;
+      font-size: 0.75rem; display: flex; align-items: center; justify-content: center;
+      transition: background var(--transition);
+    }
+    .img-card-remove:hover { background: var(--danger); }
+    /* Upload progress overlay on card */
+    .img-card-overlay {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 0.35rem;
+      font-size: 0.7rem; color: #fff;
+    }
+    .img-card-overlay .mini-progress {
+      width: 80%; height: 3px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 99px; overflow: hidden;
+    }
+    .img-card-overlay .mini-bar {
+      height: 100%; background: var(--accent-grad);
+      border-radius: 99px; transition: width 0.3s ease;
+    }
+    .img-card.done .img-card-overlay { display: none; }
+    /* Summary line below grid */
+    .img-summary { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem; }
   </style>
 </head>
 <body>
@@ -168,29 +201,17 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="attachment-file">Attachment Image</label>
+            <label class="form-label" for="attachment-file">Attachment Images</label>
             <div class="drop-zone" id="drop-zone">
-              <input type="file" id="attachment-file" accept="image/*" onchange="handleFileSelect(this)" />
-              <div id="drop-zone-empty">
-                <div class="drop-zone-icon">🖼️</div>
-                <div class="drop-zone-label">Click to upload or drag &amp; drop</div>
-                <div class="drop-zone-hint">JPEG, PNG, GIF, WebP — max 10 MB</div>
-              </div>
+              <input type="file" id="attachment-file" accept="image/*" multiple
+                onchange="handleFileSelect(this)" />
+              <div class="drop-zone-icon">🖼️</div>
+              <div class="drop-zone-label">Click to choose images or drag &amp; drop</div>
+              <div class="drop-zone-hint">JPEG, PNG, GIF, WebP · max 10 MB each · multiple allowed</div>
             </div>
-            <div id="img-preview" class="hidden">
-              <div class="img-preview-wrap">
-                <img id="preview-img" src="" alt="Preview" />
-                <div class="img-preview-info">
-                  <div class="img-preview-name" id="preview-name"></div>
-                  <div class="img-preview-size" id="preview-size"></div>
-                  <div class="upload-progress" id="upload-progress">
-                    <div class="upload-progress-bar" id="upload-progress-bar"></div>
-                  </div>
-                  <div id="upload-status" class="text-xs mt-1" style="color:var(--text-muted);">Ready to upload</div>
-                </div>
-                <button type="button" class="btn btn-danger btn-sm" onclick="clearFile()" title="Remove">✕</button>
-              </div>
-            </div>
+            <!-- Preview grid (populated by JS) -->
+            <div id="img-grid" class="img-grid"></div>
+            <div id="img-summary" class="img-summary hidden"></div>
           </div>
 
           <div class="flex gap-1" style="justify-content:flex-end; flex-wrap:wrap;">

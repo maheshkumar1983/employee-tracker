@@ -3,11 +3,16 @@
 // Routes:
 //   POST /api/login         Employee login → JWT
 //   POST /api/admin-login   Admin login → JWT
-//   POST /api/upload        Upload image to R2
-//   GET  /api/files/:key    Serve image from R2 (JWT via ?token=)
-//   POST /api/submit        Submit task row to Google Sheets
+//   POST /api/upload        Upload image to Google Drive → returns public URL
+//   POST /api/submit        Submit task row (stores Drive URLs in Sheet)
 //   GET  /api/submissions   Read rows (role-filtered)
 //   GET  /api/me            Current user
+// ============================================================
+//
+// Required secrets (wrangler secret put ...):
+//   JWT_SECRET, ADMIN_PIN, EMPLOYEES_JSON
+//   GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY
+//   SPREADSHEET_ID, DRIVE_FOLDER_ID
 // ============================================================
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg','image/jpg','image/png','image/gif','image/webp','image/heic','image/heif'];
@@ -31,12 +36,13 @@ function b64(str) {
 }
 
 // ── Google OAuth2 access token via service account JWT ───────
-async function getGoogleAccessToken(env) {
+// scope: space-separated Google OAuth2 scope string
+async function getGoogleAccessToken(env, scope) {
   const now = Math.floor(Date.now() / 1000);
   const header = b64(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const payload = b64(JSON.stringify({
     iss: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    scope,
     aud: 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now,
@@ -76,7 +82,7 @@ async function getGoogleAccessToken(env) {
 
 // ── Append a row to Google Sheets ────────────────────────────
 async function appendRow(env, values) {
-  const token = await getGoogleAccessToken(env);
+  const token = await getGoogleAccessToken(env, 'https://www.googleapis.com/auth/spreadsheets');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.SPREADSHEET_ID}/values/Sheet1!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
@@ -89,14 +95,79 @@ async function appendRow(env, values) {
 
 // ── Read all rows from Google Sheets ─────────────────────────
 async function readRows(env) {
-  const token = await getGoogleAccessToken(env);
+  const token = await getGoogleAccessToken(env, 'https://www.googleapis.com/auth/spreadsheets');
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${env.SPREADSHEET_ID}/values/Sheet1!A1:Z1000`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error('Sheets read failed: ' + await res.text());
   const data = await res.json();
   return data.values || [];
+}
+
+// ── Upload image to Google Drive ─────────────────────────────
+// Returns { fileId, viewUrl } where viewUrl is a public direct-view URL
+async function uploadToDrive(env, file, uploadedBy) {
+  const token = await getGoogleAccessToken(env,
+    'https://www.googleapis.com/auth/drive.file'
+  );
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+  const filename = `${uploadedBy}_${Date.now()}_${safeName}`;
+
+  // Build multipart/related body for Drive upload
+  const boundary = 'EmpTracker' + Math.random().toString(36).slice(2, 10);
+  const metadata = JSON.stringify({
+    name: filename,
+    parents: [env.DRIVE_FOLDER_ID],
+    description: `Uploaded by ${uploadedBy}`,
+  });
+
+  const enc = new TextEncoder();
+  const metaPart  = enc.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`);
+  const dataPart  = enc.encode(`--${boundary}\r\nContent-Type: ${file.type}\r\n\r\n`);
+  const endPart   = enc.encode(`\r\n--${boundary}--`);
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+
+  const body = new Uint8Array(metaPart.length + dataPart.length + fileBytes.length + endPart.length);
+  let offset = 0;
+  body.set(metaPart,  offset); offset += metaPart.length;
+  body.set(dataPart,  offset); offset += dataPart.length;
+  body.set(fileBytes, offset); offset += fileBytes.length;
+  body.set(endPart,   offset);
+
+  // Upload the file
+  const uploadRes = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    }
+  );
+  if (!uploadRes.ok) throw new Error('Drive upload failed: ' + await uploadRes.text());
+  const fileData = await uploadRes.json();
+
+  // Make the file publicly readable (anyone with link can view)
+  const permRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileData.id}/permissions`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    }
+  );
+  if (!permRes.ok) throw new Error('Drive permission set failed: ' + await permRes.text());
+
+  // Direct embeddable image URL (works in <img> tags)
+  const viewUrl = `https://drive.google.com/uc?export=view&id=${fileData.id}`;
+  const shareUrl = `https://drive.google.com/file/d/${fileData.id}/view`;
+
+  return { fileId: fileData.id, viewUrl, shareUrl };
 }
 
 // ── Simple JWT (HS256 using Web Crypto HMAC) ─────────────────
@@ -144,22 +215,18 @@ function bearerToken(req) {
   return auth.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-// ── Default employees (override via KV or env) ────────────────
-// In production, store as JSON secret EMPLOYEES_JSON
-// Format: [{"id":"EMP001","pin":"1234","name":"Alice","department":"Engineering"}]
+// ── Parse employees from secret ──────────────────────────────
 function parseEmployees(env) {
-  try {
-    return JSON.parse(env.EMPLOYEES_JSON || '[]');
-  } catch { return []; }
+  try { return JSON.parse(env.EMPLOYEES_JSON || '[]'); }
+  catch { return []; }
 }
 
 // ── Main router ───────────────────────────────────────────────
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
+    const url  = new URL(request.url);
     const path = url.pathname;
 
-    // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -171,7 +238,6 @@ export default {
         const employees = parseEmployees(env);
         const emp = employees.find(e => e.id === employeeId && e.pin === pin);
         if (!emp) return json({ error: 'Invalid Employee ID or PIN' }, 401);
-
         const token = await signJWT(
           { sub: emp.id, name: emp.name, dept: emp.department, role: 'employee', exp: Math.floor(Date.now() / 1000) + 28800 },
           env.JWT_SECRET
@@ -190,6 +256,33 @@ export default {
         return json({ token });
       }
 
+      // ── POST /api/upload — upload image to Google Drive ──────
+      if (path === '/api/upload' && request.method === 'POST') {
+        const token = bearerToken(request);
+        const payload = token ? await verifyJWT(token, env.JWT_SECRET) : null;
+        if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
+
+        if (!env.DRIVE_FOLDER_ID) return json({ error: 'Google Drive folder not configured' }, 503);
+
+        let formData;
+        try { formData = await request.formData(); }
+        catch { return json({ error: 'Invalid multipart form data' }, 400); }
+
+        const file = formData.get('file');
+        if (!file || typeof file === 'string') return json({ error: 'No file provided' }, 400);
+
+        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+          return json({ error: 'Only image files are allowed (JPEG, PNG, GIF, WebP)' }, 415);
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          return json({ error: 'File too large — maximum 10 MB' }, 413);
+        }
+
+        const result = await uploadToDrive(env, file, payload.sub);
+        // Return the embeddable view URL — stored directly in Google Sheet
+        return json({ viewUrl: result.viewUrl, shareUrl: result.shareUrl, fileId: result.fileId });
+      }
+
       // ── POST /api/submit ─────────────────────────────────────
       if (path === '/api/submit' && request.method === 'POST') {
         const token = bearerToken(request);
@@ -197,13 +290,15 @@ export default {
         if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
 
         const body = await request.json();
-        const { taskTitle, description, projectCode, date, hours, status, priority, notes, attachmentKey } = body;
+        const { taskTitle, description, projectCode, date, hours, status, priority, notes, attachmentUrls } = body;
 
         if (!taskTitle || !date || !status) return json({ error: 'taskTitle, date and status are required' }, 400);
 
         const timestamp = new Date().toISOString();
-        // attachmentKey is the R2 object key; store full viewer path in the Sheet
-        const attachmentPath = attachmentKey ? `/api/files/${attachmentKey}` : '';
+        // attachmentUrls is string[] of public Google Drive view URLs
+        const urls = Array.isArray(attachmentUrls) ? attachmentUrls : (attachmentUrls ? [attachmentUrls] : []);
+        const attachmentCell = urls.join(','); // comma-separated in one Sheet cell
+
         const row = [
           timestamp,
           payload.sub,
@@ -217,7 +312,7 @@ export default {
           status,
           priority || 'Medium',
           notes || '',
-          attachmentPath,
+          attachmentCell, // Google Drive URLs, comma-separated
         ];
 
         await appendRow(env, row);
@@ -235,79 +330,11 @@ export default {
 
         const headers = rows[0];
         const data = rows.slice(1);
-
-        // Employees only see their own rows
         const filtered = payload.role === 'admin'
           ? data
           : data.filter(r => r[1] === payload.sub);
 
         return json({ headers, rows: filtered, role: payload.role });
-      }
-
-      // ── POST /api/upload ─────────────────────────────────────
-      if (path === '/api/upload' && request.method === 'POST') {
-        const token = bearerToken(request);
-        const payload = token ? await verifyJWT(token, env.JWT_SECRET) : null;
-        if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
-
-        if (!env.ATTACHMENTS) return json({ error: 'R2 storage not configured' }, 503);
-
-        let formData;
-        try { formData = await request.formData(); }
-        catch { return json({ error: 'Invalid multipart form data' }, 400); }
-
-        const file = formData.get('file');
-        if (!file || typeof file === 'string') return json({ error: 'No file provided' }, 400);
-
-        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-          return json({ error: 'Only image files are allowed (JPEG, PNG, GIF, WebP, HEIC)' }, 415);
-        }
-        if (file.size > MAX_FILE_SIZE) {
-          return json({ error: 'File too large — maximum 10 MB' }, 413);
-        }
-
-        // Sanitise filename and build a unique R2 key
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
-        const ext = file.type.split('/')[1].replace('jpeg','jpg');
-        const key = `${payload.sub}/${Date.now()}-${safeName}`;
-
-        await env.ATTACHMENTS.put(key, file.stream(), {
-          httpMetadata: { contentType: file.type },
-          customMetadata: { uploadedBy: payload.sub, originalName: file.name },
-        });
-
-        return json({ key, viewUrl: `/api/files/${key}` });
-      }
-
-      // ── GET /api/files/:key — serve image from R2 ────────────
-      if (path.startsWith('/api/files/') && request.method === 'GET') {
-        // JWT can be in Authorization header OR ?token= query param (needed for <img> tags)
-        const qToken = url.searchParams.get('token');
-        const rawToken = bearerToken(request) || qToken;
-        const payload = rawToken ? await verifyJWT(rawToken, env.JWT_SECRET) : null;
-        if (!payload) {
-          return new Response('Unauthorized', { status: 401, headers: CORS_HEADERS });
-        }
-
-        if (!env.ATTACHMENTS) return json({ error: 'R2 storage not configured' }, 503);
-
-        const key = path.slice('/api/files/'.length);
-        // Employees can only view their own files; admins can view all
-        if (payload.role !== 'admin' && !key.startsWith(payload.sub + '/')) {
-          return new Response('Forbidden', { status: 403, headers: CORS_HEADERS });
-        }
-
-        const object = await env.ATTACHMENTS.get(key);
-        if (!object) return new Response('File not found', { status: 404, headers: CORS_HEADERS });
-
-        return new Response(object.body, {
-          headers: {
-            ...CORS_HEADERS,
-            'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
-            'Cache-Control': 'private, max-age=86400',
-            'Content-Disposition': 'inline',
-          },
-        });
       }
 
       // ── GET /api/me ──────────────────────────────────────────

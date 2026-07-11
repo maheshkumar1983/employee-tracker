@@ -13,9 +13,4 @@ APP_NAME = "Employee Task Tracker"
 # wrangler secret put GOOGLE_PRIVATE_KEY
 # wrangler secret put SPREADSHEET_ID
 # wrangler secret put EMPLOYEES_JSON
-
-# R2 bucket for image attachments
-# Create with: npx wrangler r2 bucket create employee-attachments
-[[r2_buckets]]
-binding = "ATTACHMENTS"
-bucket_name = "employee-attachments"
+# wrangler secret put DRIVE_FOLDER_ID   ← ID of the Google Drive folder for uploads

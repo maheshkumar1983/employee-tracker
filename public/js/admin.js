@@ -178,16 +178,22 @@ function exportCSV() {
   URL.revokeObjectURL(url);
 }
 
-// ── Image thumbnail (JWT auth via query param for <img> src) ──
-function imgThumb(path, token) {
-  if (!path) return '—';
-  const url = API_BASE_URL + path + '?token=' + encodeURIComponent(token);
-  return `<a href="${url}" target="_blank" rel="noopener">
-    <img src="${url}" alt="attachment"
-      style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;"
-      onerror="this.parentElement.innerHTML='<span style=color:var(--text-muted);font-size:0.75rem>N/A</span>'" />
-  </a>`;
+// ── Image thumbnail strip — Drive URLs are public, no auth needed ──
+// Column M stores comma-separated Google Drive uc?export=view URLs
+function imgThumb(driveUrlCsv, _token) {
+  if (!driveUrlCsv) return '—';
+  const urls = driveUrlCsv.split(',').map(u => u.trim()).filter(Boolean);
+  if (!urls.length) return '—';
+  return urls.map(url => `
+    <a href="${url}" target="_blank" rel="noopener" style="display:inline-block;">
+      <img src="${url}" alt="attachment"
+        style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid var(--border);cursor:zoom-in;margin-right:3px;"
+        onerror="this.style.display='none'" />
+    </a>`).join('');
 }
+
+
+
 
 // ── Helpers ───────────────────────────────────────────────────
 function formatDate(ts) {

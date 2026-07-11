@@ -18,8 +18,12 @@ const PRIORITY_BADGES = {
 };
 
 let allRows = [];
-let selectedFile = null;  // holds File object chosen by user
-let uploadedKey  = null;  // holds R2 key after successful upload
+
+// selectedFiles: Map<localId, { file, previewUrl }>
+// driveUrls:     Map<localId, string>  (Drive viewUrl after upload)
+let selectedFiles = new Map();
+let driveUrls     = new Map();
+let nextFileId    = 0;
 
 // ── Init ──────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -51,33 +55,29 @@ function switchTab(name, btn) {
   if (name === 'history' && allRows.length === 0) loadHistory();
 }
 
-// ── Submit form (two-step: upload then submit) ────────────────
+// ── Submit form (parallel upload + submit) ─────────────────
 async function handleSubmit(e) {
   e.preventDefault();
   clearAlert();
   setSubmitLoading(true);
 
-  // Step 1: upload image if selected
-  let attachmentKey = null;
-  if (selectedFile) {
-    setUploadStatus('Uploading image…', 10);
+  // Step 1: upload all images to Google Drive in parallel
+  let attachmentUrls = [];
+  if (selectedFiles.size > 0) {
+    setSummary(`Uploading ${selectedFiles.size} image(s) to Google Drive…`);
     try {
-      const fd = new FormData();
-      fd.append('file', selectedFile);
-      const upRes = await fetch(API_BASE_URL + '/api/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: fd,
-      });
-      const upData = await upRes.json();
-      if (!upRes.ok) {
-        showAlert(upData.error || 'Image upload failed');
+      const uploads = [...selectedFiles.entries()].map(([id, { file }]) =>
+        uploadOneFile(file, id)
+      );
+      const results = await Promise.all(uploads);
+      const failed  = results.filter(r => !r.viewUrl);
+      if (failed.length) {
+        showAlert(`${failed.length} image(s) failed to upload. Please try again.`);
         setSubmitLoading(false);
-        setUploadStatus('Upload failed', 0);
         return;
       }
-      attachmentKey = upData.key;
-      setUploadStatus('Image uploaded ✓', 100);
+      attachmentUrls = results.map(r => r.viewUrl);
+      setSummary(`✓ ${attachmentUrls.length} image(s) saved to Google Drive`);
     } catch {
       showAlert('Image upload failed — check your connection.');
       setSubmitLoading(false);
@@ -85,7 +85,7 @@ async function handleSubmit(e) {
     }
   }
 
-  // Step 2: submit the task row
+  // Step 2: submit task row
   const payload = {
     taskTitle:     document.getElementById('task-title').value.trim(),
     description:   document.getElementById('description').value.trim(),
@@ -95,7 +95,7 @@ async function handleSubmit(e) {
     status:        document.getElementById('status').value,
     priority:      document.getElementById('priority').value,
     notes:         document.getElementById('notes').value.trim(),
-    attachmentKey,   // R2 key (null if no image)
+    attachmentUrls, // string[] of public Google Drive view URLs
   };
 
   try {
@@ -120,11 +120,34 @@ async function handleSubmit(e) {
   }
 }
 
+// Upload a single file to Google Drive; update its card overlay
+async function uploadOneFile(file, localId) {
+  setCardOverlay(localId, 'Uploading…', 30);
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(API_BASE_URL + '/api/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    setCardOverlay(localId, '✓', 100);
+    const card = document.getElementById(`card-${localId}`);
+    if (card) setTimeout(() => card.classList.add('done'), 400);
+    return { viewUrl: data.viewUrl }; // public Google Drive URL
+  } catch (err) {
+    setCardOverlay(localId, '❌ Error', 0);
+    return { viewUrl: null, error: err.message };
+  }
+}
+
 function resetForm() {
   document.getElementById('submit-form').reset();
   setDefaultDate();
   clearAlert();
-  clearFile();
+  clearAllFiles();
 }
 
 function setSubmitLoading(loading) {
@@ -202,15 +225,17 @@ function renderHistory(rows) {
   document.getElementById('history-content').innerHTML = html;
 }
 
-// Build an image thumbnail cell for a stored /api/files/ path
-function imgCell(path, token) {
-  if (!path) return '—';
-  const url = API_BASE_URL + path + '?token=' + encodeURIComponent(token);
-  return `<a href="${url}" target="_blank" rel="noopener">
-    <img src="${url}" alt="attachment"
-      style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);"
-      onerror="this.parentElement.innerHTML='<span class=text-muted>N/A</span>'" />
-  </a>`;
+// Build inline image cell — Drive viewUrls are public, no token needed
+function imgCell(driveUrlCsv, _token) {
+  if (!driveUrlCsv) return '—';
+  const urls = driveUrlCsv.split(',').map(u => u.trim()).filter(Boolean);
+  if (!urls.length) return '—';
+  return urls.map(url => `
+    <a href="${url}" target="_blank" rel="noopener" style="display:inline-block;">
+      <img src="${url}" alt="attachment"
+        style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--border);margin-right:3px;"
+        onerror="this.style.display='none'" />
+    </a>`).join('');
 }
 
 function updateStats(rows) {
@@ -250,58 +275,88 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── File picker helpers ───────────────────────────────────────
+// ── File picker helpers (multi-image) ──────────────────────────
 function handleFileSelect(input) {
-  const file = input.files[0];
-  if (!file) return;
-  setSelectedFile(file);
+  addFiles([...input.files]);
+  input.value = ''; // reset so same file can be re-added after removal
 }
 
-function setSelectedFile(file) {
+function addFiles(files) {
   const MAX = 10 * 1024 * 1024;
-  if (file.size > MAX) {
-    showToast('File too large — max 10 MB', 'error');
-    return;
-  }
-  if (!file.type.startsWith('image/')) {
-    showToast('Only image files are allowed', 'error');
-    return;
-  }
-  selectedFile = file;
-  uploadedKey  = null;
-
-  // Show preview
-  const reader = new FileReader();
-  reader.onload = e => {
-    document.getElementById('preview-img').src = e.target.result;
-    document.getElementById('preview-name').textContent = file.name;
-    document.getElementById('preview-size').textContent = formatBytes(file.size);
-    document.getElementById('img-preview').classList.remove('hidden');
-    document.getElementById('drop-zone-empty').classList.add('hidden');
-    setUploadStatus('Ready to upload', 0);
-  };
-  reader.readAsDataURL(file);
+  let rejected = 0;
+  files.forEach(file => {
+    if (!file.type.startsWith('image/')) { rejected++; return; }
+    if (file.size > MAX)                 { rejected++; return; }
+    const id = nextFileId++;
+    const url = URL.createObjectURL(file);
+    selectedFiles.set(id, { file, previewUrl: url });
+    addCardToGrid(id, file, url);
+  });
+  if (rejected) showToast(`${rejected} file(s) skipped (not an image or > 10 MB)`, 'error');
+  updateSummary();
 }
 
-function clearFile() {
-  selectedFile = null;
-  uploadedKey  = null;
+function addCardToGrid(id, file, previewUrl) {
+  const grid = document.getElementById('img-grid');
+  const card = document.createElement('div');
+  card.className = 'img-card';
+  card.id = `card-${id}`;
+  card.innerHTML = `
+    <img src="${previewUrl}" alt="${esc(file.name)}" />
+    <div class="img-card-info" title="${esc(file.name)}">${esc(file.name)}</div>
+    <button class="img-card-remove" type="button" onclick="removeFile(${id})" title="Remove">✕</button>
+    <div class="img-card-overlay" id="overlay-${id}">
+      <span id="overlay-label-${id}">Ready</span>
+      <div class="mini-progress"><div class="mini-bar" id="mini-bar-${id}" style="width:0%"></div></div>
+    </div>`;
+  grid.appendChild(card);
+}
+
+function removeFile(id) {
+  const entry = selectedFiles.get(id);
+  if (entry) URL.revokeObjectURL(entry.previewUrl);
+  selectedFiles.delete(id);
+  const card = document.getElementById(`card-${id}`);
+  if (card) card.remove();
+  updateSummary();
+}
+
+function clearAllFiles() {
+  selectedFiles.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
+  selectedFiles.clear();
+  driveUrls.clear();
+  document.getElementById('img-grid').innerHTML = '';
   document.getElementById('attachment-file').value = '';
-  document.getElementById('preview-img').src = '';
-  document.getElementById('img-preview').classList.add('hidden');
-  document.getElementById('drop-zone-empty').classList.remove('hidden');
+  updateSummary();
 }
 
-function setUploadStatus(msg, progress) {
-  const el = document.getElementById('upload-status');
-  const bar = document.getElementById('upload-progress-bar');
-  if (el) el.textContent = msg;
-  if (bar) bar.style.width = progress + '%';
+function updateSummary() {
+  const el = document.getElementById('img-summary');
+  if (selectedFiles.size === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  const totalBytes = [...selectedFiles.values()].reduce((s, { file }) => s + file.size, 0);
+  el.textContent = `${selectedFiles.size} image(s) selected · ${formatBytes(totalBytes)} total`;
+  el.classList.remove('hidden');
+}
+
+function setCardOverlay(id, label, pct) {
+  const lbl = document.getElementById(`overlay-label-${id}`);
+  const bar = document.getElementById(`mini-bar-${id}`);
+  if (lbl) lbl.textContent = label;
+  if (bar) bar.style.width = pct + '%';
+}
+
+function setSummary(msg) {
+  const el = document.getElementById('img-summary');
+  el.textContent = msg;
+  el.classList.remove('hidden');
 }
 
 function formatBytes(bytes) {
-  if (bytes < 1024)       return bytes + ' B';
-  if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024)    return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
@@ -314,7 +369,6 @@ function initDropZone() {
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) setSelectedFile(file);
+    addFiles([...e.dataTransfer.files]);
   });
 }
