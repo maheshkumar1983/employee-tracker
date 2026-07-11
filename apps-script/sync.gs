@@ -1,20 +1,72 @@
 /**
- * Google Apps Script — Employee Task Tracker Sync
+ * Google Apps Script — Employee Task Tracker
  *
- * PURPOSE:
- *   Sets up the Google Sheet with header row on first run.
- *   Optionally, auto-formats the sheet and protects headers.
+ * TWO ROLES:
  *
- * HOW TO USE:
- *   1. Open your Google Sheet
- *   2. Extensions → Apps Script
- *   3. Paste this entire file, click Save
- *   4. Run "setupSheet" once to initialize headers
- *   5. Run "formatSheet" to apply colors and formatting
+ * 1. WEB APP  — doPost(e)
+ *    Receives image upload requests from the Cloudflare Worker and saves
+ *    files to Google Drive as the SCRIPT OWNER (real Google account with
+ *    storage quota). Returns a public Drive view URL.
  *
- * The Cloudflare Worker appends rows directly via the Sheets API.
- * This script handles initial setup and formatting only.
+ *    Deploy steps:
+ *      - Click "Deploy" → "New deployment" → Type: Web App
+ *      - Execute as:    Me  (your Google account — gives Drive quota)
+ *      - Who has access: Anyone  (Worker calls it server-to-server)
+ *      - Copy the Web App URL → set as APPS_SCRIPT_URL Worker secret
+ *      - Set APPS_SCRIPT_SECRET to any random string (same in Worker)
+ *
+ * 2. SHEET SETUP — setupSheet(), formatSheet()
+ *    Initialises headers, conditional formatting, summary sheet.
+ *    Run once from the Extensions → Apps Script editor.
  */
+
+// ── Shared secret — MUST match APPS_SCRIPT_SECRET Worker secret ──────────
+// Change this to any long random string before deploying.
+const UPLOAD_SECRET = 'CHANGE_ME_TO_A_LONG_RANDOM_SECRET';
+
+// ── Web App: receive image from Worker, save to Google Drive ──────────────
+function doPost(e) {
+  try {
+    const params = JSON.parse(e.postData.contents);
+
+    // Validate shared secret
+    if (!params.secret || params.secret !== UPLOAD_SECRET) {
+      return respondJSON({ error: 'Unauthorized' }, 401);
+    }
+
+    const { imageData, filename, mimeType, folderId } = params;
+
+    if (!imageData || !filename || !mimeType || !folderId) {
+      return respondJSON({ error: 'Missing required fields: imageData, filename, mimeType, folderId' }, 400);
+    }
+
+    // Decode base64 → Blob → save to the Drive folder owned by THIS account
+    const bytes = Utilities.base64Decode(imageData);
+    const blob  = Utilities.newBlob(bytes, mimeType, filename);
+
+    const folder = DriveApp.getFolderById(folderId);
+    const file   = folder.createFile(blob);
+
+    // Make publicly readable (anyone with link can view)
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const fileId   = file.getId();
+    const viewUrl  = `https://drive.google.com/uc?export=view&id=${fileId}`;
+    const shareUrl = `https://drive.google.com/file/d/${fileId}/view`;
+
+    return respondJSON({ viewUrl, shareUrl, fileId });
+
+  } catch (err) {
+    return respondJSON({ error: err.message });
+  }
+}
+
+// Helper: return JSON response
+function respondJSON(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
 
 // ── Setup: Create header row ──────────────────────────────────
 function setupSheet() {

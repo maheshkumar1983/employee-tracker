@@ -5,6 +5,10 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 APP_NAME = "Employee Task Tracker"
+# Set this to your R2 public bucket URL after enabling public access:
+# e.g. https://pub-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.r2.dev
+# You can also set it as a secret: wrangler secret put PUBLIC_R2_URL
+PUBLIC_R2_URL = "https://pub-f2c39ec5f0c34714944082e313835b0e.r2.dev"
 
 # Secrets — set these via CLI:
 # wrangler secret put JWT_SECRET
@@ -13,4 +17,9 @@ APP_NAME = "Employee Task Tracker"
 # wrangler secret put GOOGLE_PRIVATE_KEY
 # wrangler secret put SPREADSHEET_ID
 # wrangler secret put EMPLOYEES_JSON
-# wrangler secret put DRIVE_FOLDER_ID   ← ID of the Google Drive folder for uploads
+
+# R2 bucket — create with: npx wrangler r2 bucket create employee-attachments
+# Then enable public access in the Cloudflare dashboard (R2 → bucket → Settings → R2.dev subdomain)
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "employee-attachments"

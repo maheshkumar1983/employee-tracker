@@ -3,16 +3,18 @@
 // Routes:
 //   POST /api/login         Employee login → JWT
 //   POST /api/admin-login   Admin login → JWT
-//   POST /api/upload        Upload image to Google Drive → returns public URL
-//   POST /api/submit        Submit task row (stores Drive URLs in Sheet)
+//   POST /api/upload        Upload image to R2 (public bucket) → public URL
+//   POST /api/submit        Submit task row (public R2 URLs stored in Sheet)
 //   GET  /api/submissions   Read rows (role-filtered)
 //   GET  /api/me            Current user
 // ============================================================
 //
 // Required secrets (wrangler secret put ...):
 //   JWT_SECRET, ADMIN_PIN, EMPLOYEES_JSON
-//   GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY
-//   SPREADSHEET_ID, DRIVE_FOLDER_ID
+//   GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, SPREADSHEET_ID
+//
+// R2 binding: ATTACHMENTS (see wrangler.toml)
+// Set PUBLIC_R2_URL in wrangler.toml [vars] after enabling public access
 // ============================================================
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg','image/jpg','image/png','image/gif','image/webp','image/heic','image/heif'];
@@ -103,71 +105,14 @@ async function readRows(env) {
   return data.values || [];
 }
 
-// ── Upload image to Google Drive ─────────────────────────────
-// Returns { fileId, viewUrl } where viewUrl is a public direct-view URL
-async function uploadToDrive(env, file, uploadedBy) {
-  const token = await getGoogleAccessToken(env,
-    'https://www.googleapis.com/auth/drive.file'
-  );
-
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
-  const filename = `${uploadedBy}_${Date.now()}_${safeName}`;
-
-  // Build multipart/related body for Drive upload
-  const boundary = 'EmpTracker' + Math.random().toString(36).slice(2, 10);
-  const metadata = JSON.stringify({
-    name: filename,
-    parents: [env.DRIVE_FOLDER_ID],
-    description: `Uploaded by ${uploadedBy}`,
-  });
-
-  const enc = new TextEncoder();
-  const metaPart  = enc.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`);
-  const dataPart  = enc.encode(`--${boundary}\r\nContent-Type: ${file.type}\r\n\r\n`);
-  const endPart   = enc.encode(`\r\n--${boundary}--`);
-  const fileBytes = new Uint8Array(await file.arrayBuffer());
-
-  const body = new Uint8Array(metaPart.length + dataPart.length + fileBytes.length + endPart.length);
-  let offset = 0;
-  body.set(metaPart,  offset); offset += metaPart.length;
-  body.set(dataPart,  offset); offset += dataPart.length;
-  body.set(fileBytes, offset); offset += fileBytes.length;
-  body.set(endPart,   offset);
-
-  // Upload the file
-  const uploadRes = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    }
-  );
-  if (!uploadRes.ok) throw new Error('Drive upload failed: ' + await uploadRes.text());
-  const fileData = await uploadRes.json();
-
-  // Make the file publicly readable (anyone with link can view)
-  const permRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileData.id}/permissions`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
-    }
-  );
-  if (!permRes.ok) throw new Error('Drive permission set failed: ' + await permRes.text());
-
-  // Direct embeddable image URL (works in <img> tags)
-  const viewUrl = `https://drive.google.com/uc?export=view&id=${fileData.id}`;
-  const shareUrl = `https://drive.google.com/file/d/${fileData.id}/view`;
-
-  return { fileId: fileData.id, viewUrl, shareUrl };
+// ── base64-encode an ArrayBuffer safely (no call-stack overflow) ──
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 // ── Simple JWT (HS256 using Web Crypto HMAC) ─────────────────
@@ -256,13 +201,14 @@ export default {
         return json({ token });
       }
 
-      // ── POST /api/upload — upload image to Google Drive ──────
+      // ── POST /api/upload — store in R2, return public URL ────────
       if (path === '/api/upload' && request.method === 'POST') {
         const token = bearerToken(request);
         const payload = token ? await verifyJWT(token, env.JWT_SECRET) : null;
         if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
 
-        if (!env.DRIVE_FOLDER_ID) return json({ error: 'Google Drive folder not configured' }, 503);
+        if (!env.ATTACHMENTS)   return json({ error: 'R2 bucket (ATTACHMENTS) not bound in wrangler.toml' }, 503);
+        if (!env.PUBLIC_R2_URL) return json({ error: 'PUBLIC_R2_URL not set in wrangler.toml [vars]' }, 503);
 
         let formData;
         try { formData = await request.formData(); }
@@ -278,9 +224,22 @@ export default {
           return json({ error: 'File too large — maximum 10 MB' }, 413);
         }
 
-        const result = await uploadToDrive(env, file, payload.sub);
-        // Return the embeddable view URL — stored directly in Google Sheet
-        return json({ viewUrl: result.viewUrl, shareUrl: result.shareUrl, fileId: result.fileId });
+        // Build a unique R2 object key
+        const ext      = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        const key      = `${payload.sub}/${Date.now()}-${safeName}`;
+
+        // Store in R2
+        await env.ATTACHMENTS.put(key, file.stream(), {
+          httpMetadata:   { contentType: file.type },
+          customMetadata: { uploadedBy: payload.sub, originalName: file.name },
+        });
+
+        // Public URL — works because the bucket has public access enabled
+        const baseUrl = env.PUBLIC_R2_URL.replace(/\/$/, ''); // strip trailing slash
+        const viewUrl = `${baseUrl}/${key}`;
+
+        return json({ viewUrl, key });
       }
 
       // ── POST /api/submit ─────────────────────────────────────
