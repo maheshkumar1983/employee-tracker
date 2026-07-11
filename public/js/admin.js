@@ -179,10 +179,10 @@ function exportCSV() {
 }
 
 // ── Image thumbnail strip — Drive URLs are public, no auth needed ──
-// Column M stores comma-separated Google Drive uc?export=view URLs
+// Column M stores newline-separated Google Drive/R2 view URLs
 function imgThumb(driveUrlCsv, _token) {
   if (!driveUrlCsv) return '—';
-  const urls = driveUrlCsv.split(',').map(u => u.trim()).filter(Boolean);
+  const urls = driveUrlCsv.split(/[\n,]+/).map(u => u.trim()).filter(Boolean);
   if (!urls.length) return '—';
   return urls.map(url => `
     <a href="${url}" target="_blank" rel="noopener" style="display:inline-block;">

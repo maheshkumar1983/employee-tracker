@@ -254,9 +254,9 @@ export default {
         if (!taskTitle || !date || !status) return json({ error: 'taskTitle, date and status are required' }, 400);
 
         const timestamp = new Date().toISOString();
-        // attachmentUrls is string[] of public Google Drive view URLs
+        // attachmentUrls is string[] of public R2/Drive view URLs
         const urls = Array.isArray(attachmentUrls) ? attachmentUrls : (attachmentUrls ? [attachmentUrls] : []);
-        const attachmentCell = urls.join(','); // comma-separated in one Sheet cell
+        const attachmentCell = urls.join('\n'); // newline-separated in one Sheet cell
 
         const row = [
           timestamp,
@@ -271,7 +271,7 @@ export default {
           status,
           priority || 'Medium',
           notes || '',
-          attachmentCell, // Google Drive URLs, comma-separated
+          attachmentCell, // URLs on separate lines
         ];
 
         await appendRow(env, row);

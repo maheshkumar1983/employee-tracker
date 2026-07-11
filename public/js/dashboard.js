@@ -228,7 +228,7 @@ function renderHistory(rows) {
 // Build inline image cell — Drive viewUrls are public, no token needed
 function imgCell(driveUrlCsv, _token) {
   if (!driveUrlCsv) return '—';
-  const urls = driveUrlCsv.split(',').map(u => u.trim()).filter(Boolean);
+  const urls = driveUrlCsv.split(/[\n,]+/).map(u => u.trim()).filter(Boolean);
   if (!urls.length) return '—';
   return urls.map(url => `
     <a href="${url}" target="_blank" rel="noopener" style="display:inline-block;">
@@ -275,25 +275,99 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── File picker helpers (multi-image) ──────────────────────────
-function handleFileSelect(input) {
-  addFiles([...input.files]);
+// ── File picker helpers (multi-image with client-side compression) ──
+async function handleFileSelect(input) {
+  await addFiles([...input.files]);
   input.value = ''; // reset so same file can be re-added after removal
 }
 
-function addFiles(files) {
+async function addFiles(files) {
   const MAX = 10 * 1024 * 1024;
   let rejected = 0;
-  files.forEach(file => {
-    if (!file.type.startsWith('image/')) { rejected++; return; }
-    if (file.size > MAX)                 { rejected++; return; }
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) { rejected++; continue; }
+    if (file.size > MAX)                 { rejected++; continue; }
+    
+    // Optimise and compress client-side before upload (target ~1200px max width/height, 80% quality)
     const id = nextFileId++;
-    const url = URL.createObjectURL(file);
-    selectedFiles.set(id, { file, previewUrl: url });
-    addCardToGrid(id, file, url);
-  });
+    addCardToGrid(id, file, URL.createObjectURL(file)); // show immediate preview of original first
+    setCardOverlay(id, 'Compressing…', 15);
+    
+    try {
+      const optimizedFile = await compressImage(file);
+      // Replace with optimized file info
+      const url = URL.createObjectURL(optimizedFile);
+      selectedFiles.set(id, { file: optimizedFile, previewUrl: url });
+      
+      // Update the card image to the optimized one and reset overlay to ready
+      const imgEl = document.querySelector(`#card-${id} img`);
+      if (imgEl) imgEl.src = url;
+      
+      const infoEl = document.querySelector(`#card-${id} .img-card-info`);
+      if (infoEl) infoEl.textContent = `${esc(optimizedFile.name)} (${formatBytes(optimizedFile.size)})`;
+      
+      setCardOverlay(id, 'Ready', 0);
+    } catch (err) {
+      console.error('Compression failed, using original file:', err);
+      const url = URL.createObjectURL(file);
+      selectedFiles.set(id, { file, previewUrl: url });
+      setCardOverlay(id, 'Ready', 0);
+    }
+  }
   if (rejected) showToast(`${rejected} file(s) skipped (not an image or > 10 MB)`, 'error');
   updateSummary();
+}
+
+// Clientside image compression using canvas
+function compressImage(file, maxWidth = 1200, maxHeight = 1200, quality = 0.8) {
+  return new Promise((resolve) => {
+    // Only compress compressible formats
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      resolve(file);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              resolve(file);
+              return;
+            }
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
 }
 
 function addCardToGrid(id, file, previewUrl) {

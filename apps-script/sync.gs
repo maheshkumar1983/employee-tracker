@@ -145,6 +145,9 @@ function formatSheet() {
   sheet.autoResizeColumn(6); // Task Title
   sheet.autoResizeColumn(7); // Description
 
+  // Set text wrapping for Column M (Attachment URL)
+  sheet.getRange('M2:M1000').setWrap(true);
+
   // Apply alternating row colors to data
   const dataRange = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 1), lastCol);
   dataRange.setBorder(false, false, false, false, true, false, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
