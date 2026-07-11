@@ -100,7 +100,8 @@ function renderTable(rows) {
     return;
   }
 
-  const sorted = [...rows].reverse(); // newest first
+  const token  = getToken();
+  const sorted = [...rows].reverse();
 
   const html = `
     <div class="table-wrapper" style="border:none; border-radius:0;">
@@ -139,7 +140,7 @@ function renderTable(rows) {
               <td><span class="badge ${STATUS_BADGES[r[9]] || 'badge-muted'}">${esc(r[9]) || '—'}</span></td>
               <td><span class="badge ${PRIORITY_BADGES[r[10]] || 'badge-muted'}">${esc(r[10]) || '—'}</span></td>
               <td class="text-xs text-muted" style="max-width:140px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(r[11])}">${esc(r[11]) || '—'}</td>
-              <td>${r[12] ? `<a href="${esc(r[12])}" target="_blank" class="btn btn-secondary btn-sm">🔗</a>` : '—'}</td>
+              <td>${r[12] ? imgThumb(r[12], token) : '—'}</td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -177,8 +178,20 @@ function exportCSV() {
   URL.revokeObjectURL(url);
 }
 
+// ── Image thumbnail (JWT auth via query param for <img> src) ──
+function imgThumb(path, token) {
+  if (!path) return '—';
+  const url = API_BASE_URL + path + '?token=' + encodeURIComponent(token);
+  return `<a href="${url}" target="_blank" rel="noopener">
+    <img src="${url}" alt="attachment"
+      style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;"
+      onerror="this.parentElement.innerHTML='<span style=color:var(--text-muted);font-size:0.75rem>N/A</span>'" />
+  </a>`;
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 function formatDate(ts) {
+
   if (!ts) return '—';
   try {
     const d = new Date(ts);

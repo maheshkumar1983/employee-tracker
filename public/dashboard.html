@@ -6,6 +6,52 @@
   <title>My Dashboard — Task Tracker</title>
   <meta name="description" content="Submit and track your tasks in real time. Data syncs to Google Sheets." />
   <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    /* ── File upload drop zone ─────────────────────────── */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all var(--transition);
+      background: rgba(255,255,255,0.02);
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent-1);
+      background: rgba(99,102,241,0.05);
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-zone-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .drop-zone-label { font-size: 0.875rem; color: var(--text-secondary); }
+    .drop-zone-hint  { font-size: 0.75rem;  color: var(--text-muted); margin-top: 0.25rem; }
+    /* ── Image preview ──────────────────────────────── */
+    .img-preview-wrap {
+      display: flex; align-items: flex-start; gap: 1rem; margin-top: 0.875rem;
+      padding: 0.875rem; background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      animation: fadeIn 0.2s ease;
+    }
+    .img-preview-wrap img {
+      width: 80px; height: 80px; object-fit: cover;
+      border-radius: var(--radius-sm); flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+    .img-preview-info { flex: 1; min-width: 0; }
+    .img-preview-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .img-preview-size { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+    .upload-progress {
+      height: 4px; background: rgba(255,255,255,0.06); border-radius: 99px;
+      margin-top: 0.5rem; overflow: hidden;
+    }
+    .upload-progress-bar {
+      height: 100%; background: var(--accent-grad); border-radius: 99px;
+      width: 0%; transition: width 0.3s ease;
+    }
+  </style>
 </head>
 <body>
   <div class="bg-animated"></div>
@@ -122,9 +168,29 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="attachment-url">Attachment URL</label>
-            <input id="attachment-url" type="url" class="form-control" placeholder="https://drive.google.com/…" />
-            <div class="form-hint">Paste a link to any relevant document, screenshot or file</div>
+            <label class="form-label" for="attachment-file">Attachment Image</label>
+            <div class="drop-zone" id="drop-zone">
+              <input type="file" id="attachment-file" accept="image/*" onchange="handleFileSelect(this)" />
+              <div id="drop-zone-empty">
+                <div class="drop-zone-icon">🖼️</div>
+                <div class="drop-zone-label">Click to upload or drag &amp; drop</div>
+                <div class="drop-zone-hint">JPEG, PNG, GIF, WebP — max 10 MB</div>
+              </div>
+            </div>
+            <div id="img-preview" class="hidden">
+              <div class="img-preview-wrap">
+                <img id="preview-img" src="" alt="Preview" />
+                <div class="img-preview-info">
+                  <div class="img-preview-name" id="preview-name"></div>
+                  <div class="img-preview-size" id="preview-size"></div>
+                  <div class="upload-progress" id="upload-progress">
+                    <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                  </div>
+                  <div id="upload-status" class="text-xs mt-1" style="color:var(--text-muted);">Ready to upload</div>
+                </div>
+                <button type="button" class="btn btn-danger btn-sm" onclick="clearFile()" title="Remove">✕</button>
+              </div>
+            </div>
           </div>
 
           <div class="flex gap-1" style="justify-content:flex-end; flex-wrap:wrap;">

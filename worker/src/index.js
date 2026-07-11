@@ -1,7 +1,17 @@
 // ============================================================
 // Employee Task Tracker — Cloudflare Worker API
-// Routes: POST /api/login, POST /api/submit, GET /api/submissions, POST /api/admin-login
+// Routes:
+//   POST /api/login         Employee login → JWT
+//   POST /api/admin-login   Admin login → JWT
+//   POST /api/upload        Upload image to R2
+//   GET  /api/files/:key    Serve image from R2 (JWT via ?token=)
+//   POST /api/submit        Submit task row to Google Sheets
+//   GET  /api/submissions   Read rows (role-filtered)
+//   GET  /api/me            Current user
 // ============================================================
+
+const ALLOWED_IMAGE_TYPES = ['image/jpeg','image/jpg','image/png','image/gif','image/webp','image/heic','image/heif'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -187,11 +197,13 @@ export default {
         if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
 
         const body = await request.json();
-        const { taskTitle, description, projectCode, date, hours, status, priority, notes, attachmentUrl } = body;
+        const { taskTitle, description, projectCode, date, hours, status, priority, notes, attachmentKey } = body;
 
         if (!taskTitle || !date || !status) return json({ error: 'taskTitle, date and status are required' }, 400);
 
         const timestamp = new Date().toISOString();
+        // attachmentKey is the R2 object key; store full viewer path in the Sheet
+        const attachmentPath = attachmentKey ? `/api/files/${attachmentKey}` : '';
         const row = [
           timestamp,
           payload.sub,
@@ -205,7 +217,7 @@ export default {
           status,
           priority || 'Medium',
           notes || '',
-          attachmentUrl || '',
+          attachmentPath,
         ];
 
         await appendRow(env, row);
@@ -230,6 +242,72 @@ export default {
           : data.filter(r => r[1] === payload.sub);
 
         return json({ headers, rows: filtered, role: payload.role });
+      }
+
+      // ── POST /api/upload ─────────────────────────────────────
+      if (path === '/api/upload' && request.method === 'POST') {
+        const token = bearerToken(request);
+        const payload = token ? await verifyJWT(token, env.JWT_SECRET) : null;
+        if (!payload || payload.role !== 'employee') return json({ error: 'Unauthorized' }, 401);
+
+        if (!env.ATTACHMENTS) return json({ error: 'R2 storage not configured' }, 503);
+
+        let formData;
+        try { formData = await request.formData(); }
+        catch { return json({ error: 'Invalid multipart form data' }, 400); }
+
+        const file = formData.get('file');
+        if (!file || typeof file === 'string') return json({ error: 'No file provided' }, 400);
+
+        if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+          return json({ error: 'Only image files are allowed (JPEG, PNG, GIF, WebP, HEIC)' }, 415);
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          return json({ error: 'File too large — maximum 10 MB' }, 413);
+        }
+
+        // Sanitise filename and build a unique R2 key
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+        const ext = file.type.split('/')[1].replace('jpeg','jpg');
+        const key = `${payload.sub}/${Date.now()}-${safeName}`;
+
+        await env.ATTACHMENTS.put(key, file.stream(), {
+          httpMetadata: { contentType: file.type },
+          customMetadata: { uploadedBy: payload.sub, originalName: file.name },
+        });
+
+        return json({ key, viewUrl: `/api/files/${key}` });
+      }
+
+      // ── GET /api/files/:key — serve image from R2 ────────────
+      if (path.startsWith('/api/files/') && request.method === 'GET') {
+        // JWT can be in Authorization header OR ?token= query param (needed for <img> tags)
+        const qToken = url.searchParams.get('token');
+        const rawToken = bearerToken(request) || qToken;
+        const payload = rawToken ? await verifyJWT(rawToken, env.JWT_SECRET) : null;
+        if (!payload) {
+          return new Response('Unauthorized', { status: 401, headers: CORS_HEADERS });
+        }
+
+        if (!env.ATTACHMENTS) return json({ error: 'R2 storage not configured' }, 503);
+
+        const key = path.slice('/api/files/'.length);
+        // Employees can only view their own files; admins can view all
+        if (payload.role !== 'admin' && !key.startsWith(payload.sub + '/')) {
+          return new Response('Forbidden', { status: 403, headers: CORS_HEADERS });
+        }
+
+        const object = await env.ATTACHMENTS.get(key);
+        if (!object) return new Response('File not found', { status: 404, headers: CORS_HEADERS });
+
+        return new Response(object.body, {
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': object.httpMetadata?.contentType || 'application/octet-stream',
+            'Cache-Control': 'private, max-age=86400',
+            'Content-Disposition': 'inline',
+          },
+        });
       }
 
       // ── GET /api/me ──────────────────────────────────────────

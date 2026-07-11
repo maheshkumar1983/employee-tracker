@@ -68,20 +68,26 @@ function formatSheet() {
   colWidths.forEach((w, i) => sheet.setColumnWidth(i + 1, w));
 
   // Status column conditional formatting
+  // Each rule MUST have .setRanges([]) set, and the final call goes on the sheet
   const statusRange = sheet.getRange('J2:J1000');
   const rules = [
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('Completed').setBackground('#d4edda').setFontColor('#155724').build(),
+      .whenTextEqualTo('Completed').setBackground('#d4edda').setFontColor('#155724')
+      .setRanges([statusRange]).build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('In Progress').setBackground('#cce5ff').setFontColor('#004085').build(),
+      .whenTextEqualTo('In Progress').setBackground('#cce5ff').setFontColor('#004085')
+      .setRanges([statusRange]).build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('Blocked').setBackground('#f8d7da').setFontColor('#721c24').build(),
+      .whenTextEqualTo('Blocked').setBackground('#f8d7da').setFontColor('#721c24')
+      .setRanges([statusRange]).build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('Review').setBackground('#fff3cd').setFontColor('#856404').build(),
+      .whenTextEqualTo('Review').setBackground('#fff3cd').setFontColor('#856404')
+      .setRanges([statusRange]).build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('On Hold').setBackground('#e2e3e5').setFontColor('#383d41').build(),
+      .whenTextEqualTo('On Hold').setBackground('#e2e3e5').setFontColor('#383d41')
+      .setRanges([statusRange]).build(),
   ];
-  statusRange.setConditionalFormatRules(rules);
+  sheet.setConditionalFormatRules(rules); // Must be called on sheet, not range
 
   // Auto-resize based on content for key columns
   sheet.autoResizeColumn(6); // Task Title
