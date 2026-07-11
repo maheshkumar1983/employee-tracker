@@ -1,0 +1,21 @@
+name = "employee-tracker-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Non-secret vars (override these or set via dashboard)
+APP_NAME = "Employee Task Tracker"
+
+# Secrets — set these via CLI:
+# wrangler secret put JWT_SECRET
+# wrangler secret put ADMIN_PIN
+# wrangler secret put GOOGLE_SERVICE_ACCOUNT_EMAIL
+# wrangler secret put GOOGLE_PRIVATE_KEY
+# wrangler secret put SPREADSHEET_ID
+# wrangler secret put EMPLOYEES_JSON
+
+#[[routes]]
+# Optional: bind to a custom route pattern
+# pattern = "api.yourdomain.com/*"
+# zone_name = "yourdomain.com"

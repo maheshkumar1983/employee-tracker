@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Employee Task Tracker — Login</title>
+  <meta name="description" content="Secure employee portal for task tracking and reporting. Login with your Employee ID and PIN." />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    .login-card { animation: fadeIn 0.5s ease both; }
+    .login-card .card { padding: 2.5rem; }
+    .pin-dots { display: flex; gap: 0.5rem; justify-content: center; margin: 0.5rem 0 0; }
+    .pin-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--border); transition: background 0.2s;
+    }
+    .pin-dot.filled { background: var(--accent-1); }
+  </style>
+</head>
+<body>
+  <div class="bg-animated"></div>
+
+  <div class="page-center">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon-lg">📊</div>
+        <h1 style="font-size:1.5rem; margin-bottom:0.25rem;">Task Tracker</h1>
+        <p style="font-size:0.875rem;">Employee Portal — Sign in to continue</p>
+      </div>
+
+      <!-- Tabs -->
+      <div class="login-tabs">
+        <button class="login-tab active" id="tab-employee" onclick="switchTab('employee')">Employee</button>
+        <button class="login-tab" id="tab-admin" onclick="switchTab('admin')">Admin</button>
+      </div>
+
+      <!-- Alert area -->
+      <div id="login-alert" class="hidden"></div>
+
+      <!-- Employee Login Form -->
+      <form id="employee-form" onsubmit="handleEmployeeLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="employee-id">Employee ID <span class="required">*</span></label>
+          <div class="input-group">
+            <span class="input-icon">👤</span>
+            <input id="employee-id" type="text" class="form-control" placeholder="e.g. EMP001"
+              autocomplete="username" required maxlength="20" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="employee-pin">PIN <span class="required">*</span></label>
+          <div class="input-group">
+            <span class="input-icon">🔐</span>
+            <input id="employee-pin" type="password" class="form-control pin-input"
+              placeholder="••••" maxlength="8" autocomplete="current-password"
+              required inputmode="numeric" oninput="updatePinDots(this, 'emp-dots')" />
+          </div>
+          <div class="pin-dots" id="emp-dots">
+            <div class="pin-dot"></div><div class="pin-dot"></div>
+            <div class="pin-dot"></div><div class="pin-dot"></div>
+          </div>
+        </div>
+        <button id="emp-submit" type="submit" class="btn btn-primary btn-block btn-lg mt-2">
+          <span id="emp-btn-text">Sign In</span>
+          <span id="emp-spinner" class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <!-- Admin Login Form -->
+      <form id="admin-form" class="hidden" onsubmit="handleAdminLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="admin-pin">Admin PIN <span class="required">*</span></label>
+          <div class="input-group">
+            <span class="input-icon">🛡️</span>
+            <input id="admin-pin" type="password" class="form-control pin-input"
+              placeholder="••••••" maxlength="10" autocomplete="current-password"
+              required inputmode="numeric" oninput="updatePinDots(this, 'adm-dots')" />
+          </div>
+          <div class="pin-dots" id="adm-dots">
+            <div class="pin-dot"></div><div class="pin-dot"></div>
+            <div class="pin-dot"></div><div class="pin-dot"></div>
+            <div class="pin-dot"></div><div class="pin-dot"></div>
+          </div>
+        </div>
+        <button id="adm-submit" type="submit" class="btn btn-primary btn-block btn-lg mt-2">
+          <span id="adm-btn-text">Admin Sign In</span>
+          <span id="adm-spinner" class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <div class="divider"></div>
+      <p class="text-center text-xs text-muted">
+        Secured by Cloudflare · Data synced to Google Sheets
+      </p>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    function switchTab(tab) {
+      document.getElementById('tab-employee').classList.toggle('active', tab === 'employee');
+      document.getElementById('tab-admin').classList.toggle('active', tab === 'admin');
+      document.getElementById('employee-form').classList.toggle('hidden', tab !== 'employee');
+      document.getElementById('admin-form').classList.toggle('hidden', tab !== 'admin');
+      document.getElementById('login-alert').classList.add('hidden');
+    }
+
+    function updatePinDots(input, dotsId) {
+      const dots = document.getElementById(dotsId).querySelectorAll('.pin-dot');
+      dots.forEach((d, i) => d.classList.toggle('filled', i < input.value.length));
+    }
+
+    function showAlert(msg, type = 'error') {
+      const el = document.getElementById('login-alert');
+      el.innerHTML = `<div class="alert alert-${type}"><span>${type === 'error' ? '⚠️' : '✅'}</span>${msg}</div>`;
+      el.classList.remove('hidden');
+    }
+
+    async function handleEmployeeLogin(e) {
+      e.preventDefault();
+      const id = document.getElementById('employee-id').value.trim();
+      const pin = document.getElementById('employee-pin').value;
+      setLoading('emp', true);
+      try {
+        const result = await login(id, pin, 'employee');
+        if (result.error) { showAlert(result.error); setLoading('emp', false); return; }
+        window.location.href = 'dashboard.html';
+      } catch (err) {
+        showAlert('Connection failed. Please try again.');
+        setLoading('emp', false);
+      }
+    }
+
+    async function handleAdminLogin(e) {
+      e.preventDefault();
+      const pin = document.getElementById('admin-pin').value;
+      setLoading('adm', true);
+      try {
+        const result = await login(null, pin, 'admin');
+        if (result.error) { showAlert(result.error); setLoading('adm', false); return; }
+        window.location.href = 'admin.html';
+      } catch (err) {
+        showAlert('Connection failed. Please try again.');
+        setLoading('adm', false);
+      }
+    }
+
+    function setLoading(prefix, loading) {
+      document.getElementById(`${prefix}-submit`).disabled = loading;
+      document.getElementById(`${prefix}-btn-text`).textContent = loading ? 'Signing in…' : (prefix === 'emp' ? 'Sign In' : 'Admin Sign In');
+      document.getElementById(`${prefix}-spinner`).classList.toggle('hidden', !loading);
+    }
+  </script>
+</body>
+</html>

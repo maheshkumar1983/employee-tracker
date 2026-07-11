@@ -1,0 +1,14 @@
+{
+  "name": "employee-tracker-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for Employee Task Tracker",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.110.0"
+  }
+}

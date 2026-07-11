@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Panel — Task Tracker</title>
+  <meta name="description" content="Admin panel to view, filter and export all employee task submissions." />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="bg-animated"></div>
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="container navbar-inner">
+      <a href="admin.html" class="nav-brand">
+        <div class="logo-icon">📊</div>
+        <span>Task Tracker <span class="badge badge-danger" style="font-size:0.65rem; margin-left:4px;">ADMIN</span></span>
+      </a>
+      <div class="nav-actions">
+        <button class="btn btn-secondary btn-sm" onclick="loadData()">🔄 Refresh</button>
+        <button class="btn btn-success btn-sm" onclick="exportCSV()">⬇️ Export CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="logout()">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container" style="padding-top:1.5rem; padding-bottom:3rem;">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-blue">👥</div>
+        <div><div class="stat-value" id="stat-employees">—</div><div class="stat-label">Employees</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-purple">📋</div>
+        <div><div class="stat-value" id="stat-total">—</div><div class="stat-label">Total Tasks</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-green">✅</div>
+        <div><div class="stat-value" id="stat-done">—</div><div class="stat-label">Completed</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon stat-icon-yellow">⏱️</div>
+        <div><div class="stat-value" id="stat-hours">—</div><div class="stat-label">Total Hours</div></div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card card-sm" style="margin-bottom:1.25rem;">
+      <div class="filters-bar">
+        <input id="filter-search" class="form-control" type="text" placeholder="🔍 Search tasks, employees…" oninput="applyFilters()" />
+        <select id="filter-status" class="form-control" onchange="applyFilters()">
+          <option value="">All Statuses</option>
+          <option>In Progress</option>
+          <option>Completed</option>
+          <option>Blocked</option>
+          <option>Review</option>
+          <option>On Hold</option>
+        </select>
+        <select id="filter-priority" class="form-control" onchange="applyFilters()">
+          <option value="">All Priorities</option>
+          <option>Critical</option>
+          <option>High</option>
+          <option>Medium</option>
+          <option>Low</option>
+        </select>
+        <select id="filter-dept" class="form-control" onchange="applyFilters()">
+          <option value="">All Departments</option>
+        </select>
+        <input id="filter-date-from" class="form-control" type="date" onchange="applyFilters()" title="From date" />
+        <input id="filter-date-to" class="form-control" type="date" onchange="applyFilters()" title="To date" />
+        <button class="btn btn-secondary btn-sm" onclick="clearFilters()">✕ Clear</button>
+      </div>
+      <div class="text-xs text-muted" id="filter-info">Loading…</div>
+    </div>
+
+    <!-- Table -->
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div id="table-content">
+        <div style="padding:3rem; text-align:center;">
+          <div class="spinner" style="margin:0 auto;"></div>
+          <p class="text-muted mt-2">Fetching data from Google Sheets…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
