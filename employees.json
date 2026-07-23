@@ -16,5 +16,11 @@
         "pin": "9012",
         "name": "Carol Jones",
         "department": "Finance"
+    },
+    {
+        "id": "rani",
+        "pin": "1001",
+        "name": "Rani S",
+        "department": "Finance"
     }
 ]
