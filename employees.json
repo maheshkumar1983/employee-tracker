@@ -1,26 +1,26 @@
 [
     {
-        "id": "EMP001",
-        "pin": "1234",
-        "name": "Alice Chen",
-        "department": "Engineering"
+        "id": "SSN-003",
+        "pin": "003",
+        "name": "Bhagyaraj. A",
+        "Qulification ": "DEEE"
     },
     {
-        "id": "EMP002",
-        "pin": "5678",
-        "name": "Bob Smith",
-        "department": "Marketing"
+        "id": "SSN-007",
+        "pin": "007",
+        "name": "Dinesh",
+        "Qulification ": "ITI"
     },
     {
-        "id": "EMP003",
-        "pin": "9012",
-        "name": "Carol Jones",
-        "department": "Finance"
+        "id": "SSN-006",
+        "pin": "006",
+        "name": "Sabarinath",
+        "Qulification ": "DEEE"
     },
     {
-        "id": "rani",
-        "pin": "1001",
-        "name": "Rani S",
-        "department": "Finance"
+        "id": "SSN-012",
+        "pin": "012",
+        "name": "Siva",
+        "Qulification ": "DEEE"
     }
 ]
