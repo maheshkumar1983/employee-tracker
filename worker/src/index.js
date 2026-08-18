@@ -224,15 +224,17 @@ export default {
           return json({ error: 'File too large — maximum 10 MB' }, 413);
         }
 
-        // Build a unique R2 object key
-        const ext      = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
-        const key      = `${payload.sub}/${Date.now()}-${safeName}`;
+        // Build a unique R2 object key using R/RL Number (or fallback to employee ID/Unassigned)
+        const ext            = (file.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+        const safeName       = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        const rawProjectCode = formData.get('projectCode') || formData.get('rrlNumber') || '';
+        const folderName     = rawProjectCode.toString().trim().replace(/[^a-zA-Z0-9._-]/g, '_') || (payload.sub || 'Unassigned');
+        const key            = `${folderName}/${Date.now()}-${safeName}`;
 
         // Store in R2
         await env.ATTACHMENTS.put(key, file.stream(), {
           httpMetadata:   { contentType: file.type },
-          customMetadata: { uploadedBy: payload.sub, originalName: file.name },
+          customMetadata: { uploadedBy: payload.sub, originalName: file.name, rrlNumber: rawProjectCode.toString() },
         });
 
         // Public URL — works because the bucket has public access enabled

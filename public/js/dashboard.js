@@ -120,12 +120,16 @@ async function handleSubmit(e) {
   }
 }
 
-// Upload a single file to Google Drive; update its card overlay
+// Upload a single file to Cloudflare R2; update its card overlay
 async function uploadOneFile(file, localId) {
   setCardOverlay(localId, 'Uploading…', 30);
   try {
     const fd = new FormData();
     fd.append('file', file);
+    const rrlNumber = document.getElementById('project-code')?.value.trim() || '';
+    if (rrlNumber) {
+      fd.append('projectCode', rrlNumber);
+    }
     const res = await fetch(API_BASE_URL + '/api/upload', {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
