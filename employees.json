@@ -58,5 +58,11 @@
         "pin": "0012",
         "name": "Siva",
         "department": "Engineering"
+    },
+    {
+        "id": "SSN-001",
+        "pin": "0001",
+        "name": "Sivakumar",
+        "department": "CEO"
     }
 ]
