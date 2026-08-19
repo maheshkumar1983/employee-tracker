@@ -145,6 +145,133 @@
       color: var(--text-muted);
       margin-top: 0.5rem;
     }
+
+    /* ── Live Camera / Webcam Modal ────────────────────── */
+    .camera-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .camera-modal.hidden {
+      display: none !important;
+    }
+    .camera-modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
+    }
+    .camera-modal-content {
+      position: relative;
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 520px;
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      flex-direction: column;
+      animation: modalFadeIn 0.25s ease;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .camera-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .camera-modal-title {
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--text-primary);
+    }
+    .camera-modal-close {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 1.25rem;
+      cursor: pointer;
+      padding: 0.25rem;
+      line-height: 1;
+    }
+    .camera-modal-close:hover {
+      color: var(--text-primary);
+    }
+    .camera-viewport-container {
+      position: relative;
+      background: #000;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #camera-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .camera-flash {
+      position: absolute;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+    .camera-flash.flash {
+      opacity: 0.85;
+    }
+    .camera-loading {
+      position: absolute;
+      inset: 0;
+      background: #0f172a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+    }
+    .camera-loading.hidden {
+      display: none;
+    }
+    .camera-thumbs-strip {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(0, 0, 0, 0.3);
+      overflow-x: auto;
+      border-top: 1px solid var(--border);
+      min-height: 56px;
+      align-items: center;
+    }
+    .camera-thumbs-strip img {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius-sm);
+      object-fit: cover;
+      border: 2px solid var(--accent-1);
+    }
+    .camera-modal-actions {
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      background: #1e293b;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
   </style>
 </head>
 
@@ -280,12 +407,27 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="attachment-file">Attachment Images</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.5rem;">
+              <label class="form-label" style="margin-bottom:0;" for="attachment-file">Attachment Images</label>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openLiveCamera()" style="display:flex; align-items:center; gap:0.35rem; background:rgba(99,102,241,0.18); border-color:var(--accent-1); color:#fff;">
+                  📹 Live Camera / Webcam
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('camera-file').click()" style="display:flex; align-items:center; gap:0.3rem;">
+                  📷 Take Photo
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('attachment-file').click()" style="display:flex; align-items:center; gap:0.3rem;">
+                  🖼️ Browse Files
+                </button>
+              </div>
+            </div>
+            <!-- Hidden direct camera capture input -->
+            <input type="file" id="camera-file" accept="image/*" capture="environment" onchange="handleFileSelect(this)" style="display:none;" />
             <div class="drop-zone" id="drop-zone">
               <input type="file" id="attachment-file" accept="image/*" multiple onchange="handleFileSelect(this)" />
-              <div class="drop-zone-icon">🖼️</div>
-              <div class="drop-zone-label">Click to choose images or drag &amp; drop</div>
-              <div class="drop-zone-hint">JPEG, PNG, GIF, WebP · max 10 MB each · multiple allowed</div>
+              <div class="drop-zone-icon">📸 🖼️</div>
+              <div class="drop-zone-label">Tap to take photo or choose images</div>
+              <div class="drop-zone-hint">Webcam, Mobile Camera &amp; Gallery supported · multiple allowed</div>
             </div>
             <!-- Preview grid (populated by JS) -->
             <div id="img-grid" class="img-grid"></div>
@@ -316,6 +458,41 @@
             <p>No submissions yet. Submit your first task!</p>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Camera / Webcam Modal -->
+  <div id="camera-modal" class="camera-modal hidden">
+    <div class="camera-modal-backdrop" onclick="closeCameraModal()"></div>
+    <div class="camera-modal-content">
+      <div class="camera-modal-header">
+        <div class="camera-modal-title">📷 Live Camera / Webcam</div>
+        <button type="button" class="camera-modal-close" onclick="closeCameraModal()">✕</button>
+      </div>
+
+      <div class="camera-viewport-container">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <div id="camera-flash" class="camera-flash"></div>
+        <div id="camera-loading" class="camera-loading">
+          <div class="spinner"></div>
+          <div style="margin-top:0.75rem; color:var(--text-secondary); font-size:0.875rem;">Starting camera…</div>
+        </div>
+      </div>
+
+      <!-- Snapped thumbnails strip in modal -->
+      <div id="camera-thumbs" class="camera-thumbs-strip hidden"></div>
+
+      <div class="camera-modal-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="camera-switch-btn" onclick="switchCameraFacing()">
+          🔄 Flip Camera
+        </button>
+        <button type="button" class="btn btn-primary" id="camera-snap-btn" onclick="captureLivePhoto()" style="padding:0.55rem 1.3rem; font-weight:600;">
+          📸 Snap Photo
+        </button>
+        <button type="button" class="btn btn-success btn-sm" onclick="closeCameraModal()">
+          ✓ Done
+        </button>
       </div>
     </div>
   </div>

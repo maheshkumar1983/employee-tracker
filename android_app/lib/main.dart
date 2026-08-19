@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,6 +50,123 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _loadConfigAndInitWebView();
   }
 
+  Future<List<String>> _androidFilePicker(FileSelectorParams params) async {
+    final picker = ImagePicker();
+
+    if (!mounted) return [];
+
+    // Show a bottom sheet so the user can choose Camera or Gallery
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (BuildContext ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Text(
+                  'Select Image Source',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.camera_alt_rounded, color: Color(0xFF818CF8)),
+                  ),
+                  title: const Text(
+                    'Camera (Take Photo)',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'Take a picture right now with your camera',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.of(ctx).pop('camera'),
+                ),
+                const Divider(color: Colors.white12),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.photo_library_rounded, color: Color(0xFF34D399)),
+                  ),
+                  title: const Text(
+                    'Gallery (Choose from Photos)',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text(
+                    'Select existing images from your gallery',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.of(ctx).pop('gallery'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    try {
+      if (action == 'camera') {
+        final XFile? photo = await picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+        );
+        if (photo != null) {
+          return [Uri.file(photo.path).toString()];
+        }
+      } else if (action == 'gallery') {
+        if (params.mode == FileSelectorMode.openMultiple) {
+          final List<XFile> photos = await picker.pickMultiImage(
+            imageQuality: 85,
+          );
+          if (photos.isNotEmpty) {
+            return photos.map((p) => Uri.file(p.path).toString()).toList();
+          }
+        } else {
+          final XFile? photo = await picker.pickImage(
+            source: ImageSource.gallery,
+            imageQuality: 85,
+          );
+          if (photo != null) {
+            return [Uri.file(photo.path).toString()];
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error selecting image: $e');
+    }
+
+    return [];
+  }
+
   Future<void> _loadConfigAndInitWebView() async {
     String url = 'https://employee-tracker.java-mahendran.workers.dev/';
     try {
@@ -70,7 +189,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
       _targetUrl = url;
     });
 
-    _controller = WebViewController()
+    final PlatformWebViewControllerCreationParams params =
+        const PlatformWebViewControllerCreationParams();
+
+    final controller = WebViewController.fromPlatformCreationParams(
+      params,
+      onPermissionRequest: (WebViewPermissionRequest request) {
+        request.grant();
+      },
+    )
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF0F172A))
       ..setNavigationDelegate(
@@ -102,8 +229,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
             }
           },
         ),
-      )
-      ..loadRequest(Uri.parse(url));
+      );
+
+    if (controller.platform is AndroidWebViewController) {
+      final androidController = controller.platform as AndroidWebViewController;
+      await androidController.setOnShowFileSelector(_androidFilePicker);
+    }
+
+    _controller = controller;
+    _controller.loadRequest(Uri.parse(url));
+
   }
 
   @override

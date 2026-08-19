@@ -450,3 +450,131 @@ function initDropZone() {
     addFiles([...e.dataTransfer.files]);
   });
 }
+
+// ── Live Webcam / Mobile Camera Modal ─────────────────────────
+let cameraStream = null;
+let currentFacingMode = 'environment'; // default to rear camera on mobile, or webcam on desktop
+let snappedCount = 0;
+
+async function openLiveCamera() {
+  const modal = document.getElementById('camera-modal');
+  const loading = document.getElementById('camera-loading');
+  const thumbs = document.getElementById('camera-thumbs');
+  
+  if (thumbs) {
+    thumbs.innerHTML = '';
+    thumbs.classList.add('hidden');
+  }
+  snappedCount = 0;
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    // If browser doesn't support getUserMedia, fallback to native file/camera input
+    const cameraInput = document.getElementById('camera-file');
+    if (cameraInput) cameraInput.click();
+    return;
+  }
+
+  modal.classList.remove('hidden');
+  loading.classList.remove('hidden');
+
+  try {
+    await startCameraStream(currentFacingMode);
+  } catch (err) {
+    console.warn('Initial camera with facingMode failed, retrying with generic constraints:', err);
+    try {
+      await startCameraStream(null);
+    } catch (fallbackErr) {
+      console.error('Camera access failed:', fallbackErr);
+      closeCameraModal();
+      showToast('Camera unavailable or permission denied. Opening camera picker.', 'warning');
+      const cameraInput = document.getElementById('camera-file');
+      if (cameraInput) cameraInput.click();
+    }
+  }
+}
+
+async function startCameraStream(facing) {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+
+  const constraints = {
+    video: facing ? { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } } : true,
+    audio: false
+  };
+
+  cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+  const video = document.getElementById('camera-video');
+  video.srcObject = cameraStream;
+  await video.play();
+  document.getElementById('camera-loading').classList.add('hidden');
+}
+
+async function switchCameraFacing() {
+  currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+  document.getElementById('camera-loading').classList.remove('hidden');
+  try {
+    await startCameraStream(currentFacingMode);
+  } catch (err) {
+    console.warn('Failed to switch camera:', err);
+    document.getElementById('camera-loading').classList.add('hidden');
+    showToast('Cannot switch camera on this device', 'info');
+  }
+}
+
+function captureLivePhoto() {
+  const video = document.getElementById('camera-video');
+  if (!video || !cameraStream) return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  
+  // If front camera, mirror image for natural selfie orientation
+  if (currentFacingMode === 'user') {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Flash visual effect
+  const flash = document.getElementById('camera-flash');
+  if (flash) {
+    flash.classList.add('flash');
+    setTimeout(() => flash.classList.remove('flash'), 150);
+  }
+
+  canvas.toBlob(async (blob) => {
+    if (!blob) return;
+    snappedCount++;
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const timestamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const filename = `camera_${timestamp}_${snappedCount}.jpg`;
+    const file = new File([blob], filename, { type: 'image/jpeg', lastModified: Date.now() });
+    
+    // Add to snapped thumbnails strip in modal
+    const thumbs = document.getElementById('camera-thumbs');
+    if (thumbs) {
+      thumbs.classList.remove('hidden');
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(blob);
+      thumbs.appendChild(img);
+    }
+
+    // Add to main form selected files
+    await addFiles([file]);
+    showToast(`📸 Photo ${snappedCount} captured!`, 'success');
+  }, 'image/jpeg', 0.88);
+}
+
+function closeCameraModal() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const modal = document.getElementById('camera-modal');
+  if (modal) modal.classList.add('hidden');
+}
